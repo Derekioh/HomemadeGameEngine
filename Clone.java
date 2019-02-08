@@ -1,0 +1,220 @@
+import static com.badlogic.jglfw.Glfw.*;
+import static com.badlogic.jglfw.gl.GL.*;
+
+class Clone{
+
+    //member data
+    private Matrix modelMatrixTranslate;
+    private Matrix modelMatrixRotate;
+    private Matrix modelMatrix;
+    private Model model;
+    private float delta = 0.01f;
+
+    //public data
+    //need modelview, modelprojeciton
+    //projection is window
+    //camera is view
+
+    // rotation before translation
+
+    public Clone(Model m){
+        modelMatrix = Matrix.identity();
+	modelMatrixTranslate = Matrix.identity();
+	modelMatrixRotate = Matrix.identity();
+	model = m;
+
+    }
+    //PRE: void, but requires the modelMatrix to be created
+    //POST: loads the modelMatrix and applies it to the viewmodel matrix
+    //      and draw the model
+    public void draw(){
+	Matrix modelViewMatrix;
+	Matrix modelViewProjectionMatrix;
+	Matrix normalMatrix;
+
+	// do the model matrix stuff modelMatrix;
+	modelMatrix = Matrix.multiply(modelMatrixTranslate, modelMatrixRotate); 
+	//modelMatrix = Matrix.multiply(modelMatrixRotate, modelMatrixTranslate);
+	modelViewMatrix = Matrix.multiply(Camera.viewMatrix, modelMatrix);
+	// modelViewMatrix = Matrix.multiply(modelMatrix, Camera.viewMatrix);
+	modelViewProjectionMatrix = Matrix.multiply(Window.projectionMatrix, modelViewMatrix);
+	normalMatrix = modelViewMatrix.normalMatrix();
+
+	glUniformMatrix4fv(Model.modelViewProjectionMatrixId, 1, true, modelViewProjectionMatrix.data(), 0);
+	glUniformMatrix4fv(Model.modelViewMatrixId, 1, true, modelViewMatrix.data(), 0);
+	glUniformMatrix4fv(Model.normalMatrixId, 1, true, normalMatrix.data(), 0);
+
+	model.draw();
+    }
+    //PRE: intakes the x,y,z movement you want to translate by
+    //POST: moves the modelMatrix by the x,y,z amount
+    public void translate(float x, float y, float z){
+	//modelMatrix = Matrix.translate(x,y,z);
+	modelMatrixTranslate = Matrix.multiply(Matrix.translate(x,y,z), modelMatrixTranslate);
+    }
+    //PRE: the x,y,z Theta values to rotate by
+    //POST: move object to the origin, rotate by x,y,z theta, move back
+    public void rotate(float x, float y, float z){
+	//modelMatrix = Matrix.rotatef(theta, x, y, z);
+	// modelMatrix = Matrix.multiply(Matrix.rotatef(theta, x, y, z), modelMatrix);
+	modelMatrixRotate = Matrix.multiply(Matrix.rotateX(x), modelMatrixRotate);
+	modelMatrixRotate = Matrix.multiply(Matrix.rotateY(y), modelMatrixRotate);	
+	modelMatrixRotate = Matrix.multiply(Matrix.rotateZ(z), modelMatrixRotate);
+    }
+    //PRE: the x,y,z of the scaling factor
+    //POST: create scalar matrix and multiply it but the model matrix
+    public void scale(float x, float y, float z){
+	Matrix scaleMatrix = Matrix.scale(x, y, z);
+	//dont need to multiply by modelMatrix because it is already multipled?
+	modelMatrix = Matrix.multiply(scaleMatrix, modelMatrix);
+    }
+    
+    //PRE: void
+    //POST: resets the modelMatrix to identity
+    public void reset(){
+	modelMatrix = Matrix.identity();
+    }
+
+    //PRE: a float array holding the model bounding vertices
+    //POST: returns the transformed array
+    public float[] getBoundingVertices(){
+	float[] returnArray = new float[24];
+	Matrix tempMatrix, temp2Matrix;
+	float[] oldBV = model.boundingVertices;
+	int count = 0;
+	for (int index = 0; index < 24; index = index + 3){
+	    tempMatrix = Matrix.vectorToMatrix(oldBV[index], oldBV[index+1], 
+					       oldBV[index+2]);
+	    temp2Matrix = Matrix.multiply(modelMatrix, tempMatrix);
+	    returnArray[count] = temp2Matrix.matrix[0][3];
+	    returnArray[count+1] = temp2Matrix.matrix[1][3];
+	    returnArray[count+2] = temp2Matrix.matrix[2][3];
+	    count = count + 3;
+	}
+	return returnArray;
+    }
+
+    //PRE: a clone object
+    //POST: returns true if collide, false otherwise
+    public boolean collide(Clone clone1){
+	float[] cMinMax = new float[2];
+	float[] c1MinMax = new float[2];
+
+	Vector[] displacementVectors = addSpecialCase(calculateDisplacementVectors(clone1));
+	for (int index = 0; index < displacementVectors.length; index++){
+	    cMinMax = computeProjMinMax(displacementVectors[index], getBoundingVertices());
+	    c1MinMax = computeProjMinMax(displacementVectors[index], clone1.getBoundingVertices());
+	    if (overlap(cMinMax[0], cMinMax[1], c1MinMax[0], c1MinMax[1]) == false){
+		System.out.println("No Collision");
+		System.out.println("------------");
+		return false;
+	    }
+	}
+
+	return true;
+    }
+
+    //PRE: a vector in the displacement array and a float array holding the clones bounding box
+    //POST: return the min and max of the line
+    public float[] computeProjMinMax(Vector dVector, float[] boundVertices){
+	float[] returnMinMax = new float[2];
+	returnMinMax[0] = Float.POSITIVE_INFINITY;
+	returnMinMax[1] = Float.NEGATIVE_INFINITY;
+	float pointOnLine = 0.0f;
+	Vector tempVector;
+	for (int index = 0; index < 24; index = index + 3){
+	    tempVector = new Vector(boundVertices[index], boundVertices[index + 1],
+				    boundVertices[index + 2]);
+	    pointOnLine = Vector.dot(dVector, tempVector);
+	    if (pointOnLine > returnMinMax[1]){
+		returnMinMax[1] = pointOnLine;
+	    }
+	    if (pointOnLine < returnMinMax[0]){
+		returnMinMax[0] = pointOnLine;
+	    }
+	}
+	return returnMinMax;
+    }
+
+    //PRE: the displacement vectors of length 6
+    //POST: adds 9 special case to the collision
+    public Vector[] addSpecialCase(Vector[] dVector){
+	Vector[] returnVector = new Vector[15];
+	int count = 0;
+
+	for (int i = 0; i < 6; i++){
+	    returnVector[i] = dVector[i];
+	}
+	for (int i = 6; i < 15; i++){
+	    for (int j = 3; j < 6; j++){
+		returnVector[i] = Vector.cross(returnVector[count], returnVector[j]);
+	    }
+	    count++;
+	}
+	return returnVector;
+    }
+
+    //PRE: a clone object
+    //POST: returns the x,y,z displacement vectors for both objects in a float array of length 6
+    public Vector[] calculateDisplacementVectors(Clone clone1){
+	float[] cVert = getBoundingVertices();
+	float[] c1Vert = clone1.getBoundingVertices();
+
+	Vector[] returnVectors = new Vector[6];
+	
+	Vector tempVector1, tempVector2;
+
+	tempVector1 = new Vector(cVert[0], cVert[1], cVert[2]);
+	tempVector2 = new Vector(cVert[12], cVert[13], cVert[14]);
+	Vector cxDisplacedVector = Vector.subtract(tempVector1, tempVector2);
+
+	tempVector1 = new Vector(cVert[3], cVert[4], cVert[5]);
+	tempVector2 = new Vector(cVert[6], cVert[7], cVert[8]);
+	Vector cyDisplacedVector = Vector.subtract(tempVector1, tempVector2);
+
+	tempVector1 = new Vector(cVert[9], cVert[10], cVert[11]);
+	tempVector2 = new Vector(cVert[6], cVert[7], cVert[8]);
+	Vector czDisplacedVector = Vector.subtract(tempVector1, tempVector2);
+
+	//////////////////////////////////////////////
+
+	tempVector1 = new Vector(c1Vert[0], c1Vert[1], c1Vert[2]);
+	tempVector2 = new Vector(c1Vert[12], c1Vert[13], c1Vert[14]);
+	Vector c1xDisplacedVector = Vector.subtract(tempVector1, tempVector2);
+
+	tempVector1 = new Vector(c1Vert[3], c1Vert[4], c1Vert[5]);
+	tempVector2 = new Vector(c1Vert[6], c1Vert[7], c1Vert[8]);
+	Vector c1yDisplacedVector = Vector.subtract(tempVector1, tempVector2);
+
+	tempVector1 = new Vector(c1Vert[9], c1Vert[10], c1Vert[11]);
+	tempVector2 = new Vector(c1Vert[6], c1Vert[7], c1Vert[8]);
+	Vector c1zDisplacedVector = Vector.subtract(tempVector1, tempVector2);
+
+	returnVectors[0] = cxDisplacedVector;
+	returnVectors[1] = cyDisplacedVector;
+	returnVectors[2] = czDisplacedVector;
+	returnVectors[3] = c1xDisplacedVector;
+	returnVectors[4] = c1yDisplacedVector;
+	returnVectors[5] = c1zDisplacedVector;
+
+	return returnVectors;
+
+    }
+
+    //PRE: 4 floats representing the min and max of 2 lines on a bigger line
+    //POST: returns true if the lines overlap, false otherwise
+    public boolean overlap(float min1, float max1, float min2, float max2){
+	if (min2 > max1){
+	    return false;
+	}else if(min1 > max2){
+	    return false;
+	}else{
+	    return true;
+	}
+    }
+ 
+    public static void main(String[] args) throws Exception {
+	
+    }
+
+}
